@@ -1,6 +1,8 @@
 import { scaleLinear, scaleThreshold } from 'd3-scale';
 
 export type HEXColor = `#${string}`;
+export type RGBAColor = `rgba(${string})` | `rgb(${string})`;
+export type ColorString = HEXColor | RGBAColor;
 
 export const COLOR_SCHEMES = {
   BrewerYlGn3: ['#f7fcb9', '#addd8e', '#31a354'],
@@ -302,20 +304,62 @@ function isValidColorSchemeName (name: string): name is (keyof typeof COLOR_SCHE
   return (colorSchemeNames as readonly string[]).includes(name);
 }
 
-const hexToIntColorRegexp = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i;
+type IntColor = [number, number, number] | [number, number, number, number];
 
-const hexToIntColor = (color: HEXColor): [number, number, number] => {
-  const result = hexToIntColorRegexp.exec(color);
-  if (result !== null) {
-    return [
-      parseInt(result[1], 16),
-      parseInt(result[2], 16),
-      parseInt(result[3], 16)
-    ];
-  } else {
+const expandShortHex = (hex: string): string =>
+  hex.split('').map((char) => `${char}${char}`).join('');
+
+const hexToIntColor = (color: HEXColor): IntColor => {
+  const hex = color.startsWith('#') ? color.slice(1) : color;
+  const normalizedHex = hex.length === 3 || hex.length === 4
+    ? expandShortHex(hex)
+    : hex;
+
+  if (![6, 8].includes(normalizedHex.length) || !/^[a-f\d]+$/i.test(normalizedHex)) {
     throw new Error(`Cannot parse hex color "${color}"`);
   }
+
+  const channels = normalizedHex.match(/.{2}/g);
+  if (channels === null) {
+    throw new Error(`Cannot parse hex color "${color}"`);
+  }
+
+  return channels.map((channel) => parseInt(channel, 16)) as IntColor;
 };
+
+const rgbaToIntColor = (color: RGBAColor): IntColor => {
+  const result = /^rgba?\((.+)\)$/i.exec(color.trim());
+  if (result === null) {
+    throw new Error(`Cannot parse rgba color "${color}"`);
+  }
+
+  const parts = result[1].split(',').map((part) => part.trim());
+  if (![3, 4].includes(parts.length)) {
+    throw new Error(`Cannot parse rgba color "${color}"`);
+  }
+
+  const rgb = parts.slice(0, 3).map((part) => Number(part));
+  const alpha = parts[3] === undefined ? undefined : Number(parts[3]);
+
+  if (
+    rgb.some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 255) ||
+    (alpha !== undefined && (!Number.isFinite(alpha) || alpha < 0 || alpha > 1))
+  ) {
+    throw new Error(`Cannot parse rgba color "${color}"`);
+  }
+
+  const intRgb = rgb.map((channel) => Math.round(channel));
+  if (alpha === undefined) {
+    return intRgb as [number, number, number];
+  }
+
+  return [...intRgb, Math.round(alpha * 255)] as [number, number, number, number];
+};
+
+const toIntColor = (color: ColorString): IntColor =>
+  color.trim().startsWith('#')
+    ? hexToIntColor(color as HEXColor)
+    : rgbaToIntColor(color as RGBAColor);
 
 const intervals = (min: number, max: number, n: number): Array<number> =>
   Array.from({length: n}, (_x, i) =>
@@ -328,7 +372,7 @@ const thresholds = (min: number, max: number, n: number): Array<number> =>
   );
 
 export type ColorScaleParams = {
-  customColors?: Array<HEXColor>,
+  customColors?: Array<ColorString>,
   colorScheme?: string,
   min: number,
   max: number,
@@ -337,7 +381,7 @@ export type ColorScaleParams = {
 }
 
 const colorScale = ({ colorScheme, customColors, min, max, isReverse = false, isContinuous = false }: ColorScaleParams) => {
-  let colors: Array<HEXColor>;
+  let colors: Array<ColorString>;
 
   if (colorScheme) {
     if (isValidColorSchemeName(colorScheme)) {
@@ -351,9 +395,13 @@ const colorScale = ({ colorScheme, customColors, min, max, isReverse = false, is
     throw new Error(`You must provide a colorScheme or an array of at least 2 customColors`);
   }
 
-  const colorInts = colors.map(hexToIntColor);
+  const colorInts = colors.map(toIntColor);
+  const hasAlpha = colorInts.some((color) => color.length === 4);
+  const normalizedColorInts = hasAlpha
+    ? colorInts.map((color) => color.length === 4 ? color : [...color, 255])
+    : colorInts;
 
-  const range = isReverse ? colorInts.reverse() : colorInts;
+  const range = isReverse ? normalizedColorInts.reverse() : normalizedColorInts;
 
   if (isContinuous) {
     const domain = intervals(min, max, range.length);

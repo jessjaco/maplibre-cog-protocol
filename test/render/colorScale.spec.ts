@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { colorScale, colorSchemeNames, HEXColor } from '../../src/render/colorScale';
+import { colorScale, colorSchemeNames, HEXColor, RGBAColor } from '../../src/render/colorScale';
 
 describe('colorSchemeNames', () => {
   test('is an array containing supported color scale names', () => {
@@ -138,5 +138,29 @@ describe('colorScale', () => {
     // Values within an interval are interpolated linearly
     expect(color(1.5)).toEqual(color3.map((c2, i) => (c2 + color2[i]) / 2));
     expect(color(2.5)).toEqual(color2.map((c2, i) => (c2 + color1[i]) / 2));
+  });
+
+  test('can generate a discrete color interpolator from rgba custom colors', () => {
+    const customColors: Array<RGBAColor> = ['rgba(255, 0, 0, 0.25)', 'rgba(0, 0, 255, 0.75)'];
+    const min = 0;
+    const max = 2;
+
+    const color = colorScale({customColors, min, max});
+
+    expect(color(min)).toEqual([255, 0, 0, 64]);
+    expect(color(1)).toEqual([0, 0, 255, 191]);
+    expect(color(max)).toEqual([0, 0, 255, 191]);
+  });
+
+  test('can generate a continuous color interpolator from rgba custom colors', () => {
+    const customColors: Array<RGBAColor> = ['rgba(255, 0, 0, 0.25)', 'rgba(0, 0, 255, 0.75)'];
+    const min = 0;
+    const max = 2;
+
+    const color = colorScale({customColors, min, max, isContinuous: true});
+
+    expect(color(min)).toEqual([255, 0, 0, 64]);
+    expect(color(1)).toEqual([127.5, 0, 127.5, 127.5]);
+    expect(color(max)).toEqual([0, 0, 255, 191]);
   });
 });
